@@ -80,6 +80,7 @@ sudo zypper install python3-base
 sudo zypper install wayland
 sudo zypper install pulseaudio
 sudo zypper install alsa-lib alsa-utils alsa-plugins-pulseaudio
+sudo zypper install clang
 
 sudo zypper install git
 sudo zypper install yasm
@@ -102,12 +103,12 @@ git clone https://github.com/godotengine/godot.git -b 4.3-stable
 После чего переходим в директорию проекта и в файле SConstruct изменяем версию Scons необходимую для сборки на поддерживаю ОС Аврора. В данном случае - 3.0.5
 Теперь можно начинать сборку движка с помощью следующей команды:
 ```
-scons platform=linuxbsd wayland=yes target=godotLinuxWayland use_llvm=yes clang=yes
+scons platform=linuxbsd wayland=yes target=editor use_llvm=yes clang=yes
 ```
 Здесь:
   platform=linuxbsd - указывает, под какую ОС происходит сборка
   wayland=yes - означает, что сборка будет осуществлять под систему, использующую wayland, вместо X11
-  target=godotLinuxWayland - задает имя, получившегося бинарного файла
+  target=editor - задает имя, получившегося бинарного файла
   use_llvm=yes - включает использование компилятора LLVM
   clang=yes - использование компилятора clang вместо gcc
 
