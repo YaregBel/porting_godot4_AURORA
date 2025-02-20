@@ -95,11 +95,15 @@ libudev (опциальная зависимость)
 
 Но так как ОС Аврора обеспечивает поддержку протокола Wayland, вместо X11, то мы просто укажем это в параметрах сборки. Благодаря чему пакеты связанные с `X Window System` нам не понадобятся.  
 Далее получим исходных код игрового движка godot версии 4.3-stable:
-`git clone https://github.com/godotengine/godot.git -b 4.3-stable`
+```
+git clone https://github.com/godotengine/godot.git -b 4.3-stable
+```
 
 После чего переходим в директорию проекта и в файле SConstruct изменяем версию Scons необходимую для сборки на поддерживаю ОС Аврора. В данном случае - 3.0.5
 Теперь можно начинать сборку движка с помощью следующей команды:
-`scons platform=linuxbsd wayland=yes target=godotLinuxWayland use_llvm=yes clang=yes`
+```
+scons platform=linuxbsd wayland=yes target=godotLinuxWayland use_llvm=yes clang=yes
+```
 Здесь:
   platform=linuxbsd - указывает, под какую ОС происходит сборка
   wayland=yes - означает, что сборка будет осуществлять под систему, использующую wayland, вместо X11
