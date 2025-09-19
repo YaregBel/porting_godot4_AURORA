@@ -1,121 +1,110 @@
-# porting_godot4_AURORA
-## Данный файл описывает подробный процесс сборки godot4 под операционную систему AURORA.
+# В данном репозитории содержится информация о процессе портирования godot4 на ОС Аврора
 
-### Сборка игрового движка под платформу linuxbsd
-Для начала попробуем собрать наш игровой движок, под linux, чтобы иметь представление о процессе сборки. 
-Для этого, используем следующий bash скрипт:
+### Создание проекта в godot
+В самом игровом движке необходимо будет создать проект, который необходимо будет запустить на самом устройстве с ОС Аврора.  Перевести его в режим "Совместимость".
+
+Далее проект необходимо будет экспортировать "Project->Export..."
+![[Pasted image 20250919135350.png]]
+После чего необходимо добавить пресет для экспорта под Linux. 
+![[Pasted image 20250919135551.png]]
+Далее в настройках шаблона для экспорта ставим галочку в пункет "ETC2 ASTC" и переходим в раздел "Export PCK/ZIP..."
+![[Pasted image 20250919135946.png]]
+Важно, что экспортировать необходимо в формате ".pck".
+После этого можно перейти к этапу работы с Build Engine. 
+
+### Работа в среде для сборки Build Engine.
+Для получения доступа к Build Engine необходимо установить AuroraSDK, в качестве технологии виртуализации выбрать VirtualBox или же Docker. Выбор Docker в данном случае предпочтительнее, так как он гораздо эффективнее использует ресурсы системы, из-за чего процесс сборки будет проходить быстрее. 
+
+Для обеспечения более стабильного и унифицированного процесса сборки, рекомендуется использовать утилиту - "sfdk", которая поставляется вместе с AuroraSDK.
+
+Для этого необходимо задать ей `alias`:
 ```bash
-cd ~/
-mkdir builds && cd $_
-git clone https://github.com/godotengine/godot.git -b 4.3-stable
-pacman -Sy --noconfirm --needed \
-  scons \
-  pkgconf \
-  gcc \
-  libxcursor \
-  libxinerama \
-  libxi \
-  libxrandr \
-  wayland-utils \
-  mesa \
-  glu \
-  libglvnd \
-  alsa-lib \
-  pulseaudio
-scons platform=linuxbsd wayland=yes
+alias sfdk=~/AuroraOS/bin/sfdk
 ```
-по итогу работы scons, в директории godot создается bin директория, которая хранит в себе готовый бинарник, для запуска игрового движка. Также добавляем поддержку wayland, сборкой с соответствующим флажком.
-
-### Подключение к build engine по SSH
-Дальнейшая работа уже будет проводится в build engine, который предоставляется вместе с Аврора SDK. 
-Для начала нужно подключиться к build engine:
+В моем же случае, я напрямую работал в Docker-контейнере. 
+Для начала, необходимо поставить необходимые для работы godot зависимости на таргеты, представленные в BuildEngine. Таргеты - это по набор компиляторов, библиотек, позволяющих производить сборку под различные архитектуры и версии ОС Аврора. 
+#### Запуск docker контейнера и настройка таргетов
+Для работы с BuildEngine напрямую в docker необходимо:
+Поднять контейнер:
 ```bash
-ssh -p 2222 -i {путь к SDK}/vmshare/ssh/private_keys/sdk mersdk@localhost
+docker run --network host -it -v /home/yareg/Documents/docker:/home/mersdk/docker aurora-os-build-engine-5.1.3.85-mb2:yareg /bin/bash
 ```
-
-Данная команда позволяет подключиться через терминал по SSH к build engine и работать уже в нем. 
-
-### Установка Аврора SDK
-Данный этап, пока не полностью реализован, в связи с недостатком необходимых библиотек, а именно:
-`libxcb-glx.so.0` Так как ее нет в репозиториях используемых zypper и pkcon.
-
-Сам же установщик Аврора SDK был скачан, используя утилиты curl:
-`curl -O https://sdk-repo.omprussia.ru/sdk/installers/5.1.3/5.1.3.85-release/AuroraSDK-MB2/AuroraSDK-5.1.3.85-MB2-release-linux-64-offline-24.12.11-07.44.11.run`
-
-### Установка и сборка godot4
-Сборка godot4 под ОС Аврора так же неудалась, по причине устаревшего инструмента для сборки, который как раз таки используется для сборки игрового движка.
-
-Для начала разберемся, какие необходимо иметь пакеты, чтобы сборка удалась:
+ - `/home/yareg/Documents/docker:/home/mersdk/docker` - я монтирую свою директорию с исходниками godot к контейнеру. Здесь важно упомянуть, что в моем случае `/home/yareg/Documents/docker` содержит исходники самого godot с которым я буду работать. Если же исходников нет, то можно клонировать официальный репозиторий godot. 
+ - aurora-os-build-engine-5.1.3.85-mb2:yareg - имя образа, из которого будет создаваться контейнер
+После захода на контейнер необходимо убедиться, что пользователем, под которым был выполнен вход является `mersdk`, если же нет, то перейти на него.
+Заходим на необходимый таргет:
+```bash
+sb2 -t AuroraOS-5.1.3.85-MB2-armv7hl -m sdk-install -R
 ```
-GCC 9+ or Clang 6+.
-Python 3.6+.
-SCons 3.1.2+ build system.
-pkg-config (used to detect the development libraries listed below).
+Установка зависимостей для godot:
+```bash
+zypper install git autoconf automake autopoint make libtool pkgconfig gcc ncurses m4 gperf gettext byacc flex perl intltool libpng llvm zlib libgdm libudev libgcrypt fontconfig freetype doxygen pixman mesa-llvmpipe meson scons clang wayland-utils
+```
+#### Сборка шаблона для экспорта из исходников игрового движка
+После того, как зависимости были поставлены, необходимо перейти к сборке шаблона для экспорта из исходников godot. Переходим в директорию игрового движка и выполняем команду:
+```bash
+scons platform=linuxbsd wayland=yes x11=no target=template_debug debug_symbols=yes use_llvm=no gcc=yes arch=arm32 CCFLAGS="-g -O0" CXXFLAGS="-g -O0" LINKFLAGS="-g" use_sowrap=no -j8 
+```
+Здесь важно отметить, что полученный шаблон для экспорта использовался для отладки приложения, поэтому он содержит множество флагов для предоставления максимальной информации при процессе отладки: `target=template_debug debug_symbols=yes CCFLAGS="-g -O0" CXXFLAGS="-g -O0" LINKFLAGS="-g"`
+Также важным моментом является отключение динамической линковки библиотек, потому что для своей работы godot требует библиотеки, которых нет в ОС Аврора, но которые также нельзя на нее установить. В данном случае, все необходимые библиотеки будут подтягиваться из устройства, а проблемные библиотеки будут предоставляться вместе с приложением и при установке .rpm-пакета на устройство, храниться в директории самого приложения.
 
-Development libraries:
-X11, Xcursor, Xinerama, Xi and XRandR.
-Wayland and wayland-scanner.
-Mesa.
-ALSA.
-PulseAudio.
-Optional - libudev (build with udev=yes).
-```
-Их загрузка и установка производилась используя следующие команды:
-```
-pkcon install zypper
-pkcon install scons
-pkcon install alsa-lib
-pkcon install wayland
-pkcon install wayland-devel 
-pkcon install gcc
+#### Сборка .rpm-пакета
+После того, как сборка шаблона для экспорта из исходников godot'а прошла успешно, переходим к сборке .rpm-пакета в который будет происходить упаковка проекта и шаблона для экспорта.
 
-sudo zypper install pkgconfig
-sudo zypper install mesa-llvmpipe
-sudo zypper install alsa-lib-devel
-sudo zypper install pkgconfig
-sudo zypper install python
-sudo zypper install python3
-sudo zypper install python3-devel
-sudo zypper install python3-base
-sudo zypper install wayland
-sudo zypper install pulseaudio
-sudo zypper install alsa-lib alsa-utils alsa-plugins-pulseaudio
-sudo zypper install clang
+Для сборки .rpm-пакета кроме .pck-файла с проектом, полученного при экспорте из godot'a и шаблона для экспорта полученного при сборке из исходников godot'a. Также понадобятся:
+- Ключ и сертификат, для подписи .rpm-пакета, так как каждый пакет, который устанавливается на устройство должен быть подписан.
+- Конфигурационные файлы
+- Скрипт, автоматизирующий процесс сборки
+Конфигурационные файлы, а также файлы со скриптами представлены в репозитории.
+Исходня из указанных в файле generate.sh полей, будет производиться генерация конфигурационных файлов, с указанными параметрами. 
 
-sudo zypper install git
-sudo zypper install yasm
-sudo zypper install harfbuzz harfbuzz-icu
-sudo zypper install pcre2
-```
-Но среди них не удалось найти следующие пакеты в репозиториях:
-```
-X11, Xcursor, Xinerama, Xi and XRandR.
-wayland-scanner
-libudev (опциальная зависимость)
-```
+После запуска файла - build_rpm.sh  будет собран, подписан и провалидирован .rpm-пакет с проектом, который можно устанавливать на устройство. 
 
-Но так как ОС Аврора обеспечивает поддержку протокола Wayland, вместо X11, то мы просто укажем это в параметрах сборки. Благодаря чему пакеты связанные с `X Window System` нам не понадобятся.  
-Далее получим исходных код игрового движка godot версии 4.3-stable:
+### Установка .rpm-пакета на устройство
+Для установки .rpm-пакета необходимо будет воспользоваться утилитой gdbus:
+```bash
+gdbus call --system --dest ru.omp.APM --object-path /ru/omp/APM --method ru.omp.APM.Install <путь_до_пакета> {}
 ```
-git clone https://github.com/godotengine/godot.git -b 4.3-stable
+При запуске .rpm-пакета необходимо будет подтянуть .pck-файл, который также был установлен в директорию с приложением.
+Если производить запуск из директории с самим бинарником, то эта процедура достигается командой:
+```bash
+./ru.yareg.game --main-pack ../data/empty.pck
 ```
+Название бинарника и .pck-файла наверняка будут отличаться.
 
-После чего переходим в директорию проекта и в файле SConstruct изменяем версию Scons необходимую для сборки на поддерживаю ОС Аврора. В данном случае - 3.0.5
-Теперь можно начинать сборку движка с помощью следующей команды:
+### Отладка проекта
+В процессе портирования необходимо было вносить изменения в исходники игрового движка, поэтому для обнаружения проблемных мест использовалась его отладка. 
+Для отладки использовалась утилита gdb. 
+На самом устройстве запускается gdbserver:
+```bash
+gdbserver --multi :2345 /opt/app/ru.yareg.game/current/bin/ru.yareg.game --main-pack /opt/app/ru.yareg.game/current/data/emptyDebug.pck
 ```
-scons platform=linuxbsd wayland=yes target=editor use_llvm=yes clang=yes
+К которому или же по wi-fi или же по usb-проводу производилось подключение с моей linux машины. Для удобства использовался редактор `vs code`. 
+В нем, после установки плагинов для работы GNU Debugger и возможности дебажить код написанный на C++. Я создал launch.json файл:
+```json
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Debug on Device",
+			"type": "cppdbg",
+			"request": "launch",
+			"program": "${workspaceFolder}/new/usr/bin/ru.yareg.game",
+			"sourceFileMap": {
+			"/home/mersdk/docker/godot": "/home/yareg/Documents/docker/godot"
+			},
+			"stopAtEntry": false,
+			"cwd": "${workspaceFolder}",
+			"MIMode": "gdb",
+			"miDebuggerPath": "/home/yareg/Programs/bin/gdb-armv7hl-meego-linux-gnueabi",
+			"miDebuggerServerAddress": "192.168.78.248:2345",
+		}
+	]
+}
 ```
 Здесь:
-  platform=linuxbsd - указывает, под какую ОС происходит сборка
-  wayland=yes - означает, что сборка будет осуществлять под систему, использующую wayland, вместо X11
-  target=editor - задает имя, получившегося бинарного файла
-  use_llvm=yes - включает использование компилятора LLVM
-  clang=yes - использование компилятора clang вместо gcc
-
-
-
-
-
-
-
+- sourceFileMap - путь до исходников godot, которые будут изменяться
+- program - путь до копии бинарника, который имеется на устройстве
+- miDebuggerPath - путь до отладчика поставляемого вместе с AuroraSDK
+- miDebuggerServerAddress - адрес сервера, по которому будет производиться подключение
 
