@@ -1,0 +1,445 @@
+From 7c798e4af479c5daa59f8779bca47d124fe99527 Mon Sep 17 00:00:00 2001
+From: YaregBel <yaroslav03bel@gmail.com>
+Date: Sun, 14 Sep 2025 13:59:54 +0700
+Subject: [PATCH] Aurora port
+
+---
+ SConstruct                                    |   2 +-
+ drivers/egl/egl_manager.cpp                   |  56 ++++--
+ .../wayland/display_server_wayland.cpp        |  25 +++
+ platform/linuxbsd/wayland/wayland_thread.cpp  | 164 +++++++++++++-----
+ platform/linuxbsd/wayland/wayland_thread.h    |  12 ++
+ 5 files changed, 198 insertions(+), 61 deletions(-)
+
+diff --git a/SConstruct b/SConstruct
+index f4500d7525..a8bf69d997 100644
+--- a/SConstruct
++++ b/SConstruct
+@@ -1,7 +1,7 @@
+ #!/usr/bin/env python
+ from misc.utility.scons_hints import *
+ 
+-EnsureSConsVersion(4, 0)
++EnsureSConsVersion(3, 0)
+ EnsurePythonVersion(3, 8)
+ 
+ # System
+diff --git a/drivers/egl/egl_manager.cpp b/drivers/egl/egl_manager.cpp
+index c545de39a6..56e63dac6f 100644
+--- a/drivers/egl/egl_manager.cpp
++++ b/drivers/egl/egl_manager.cpp
+@@ -95,8 +95,8 @@ int EGLManager::_get_gldisplay_id(void *p_display) {
+ 		new_gldisplay.egl_display = eglGetPlatformDisplayEXT(_get_platform_extension_enum(), new_gldisplay.display, (attribs.size() > 0) ? attribs.ptr() : nullptr);
+ #endif // EGL_EXT_platform_base
+ 	} else {
+-		NativeDisplayType *native_display_type = (NativeDisplayType *)new_gldisplay.display;
+-		new_gldisplay.egl_display = eglGetDisplay(*native_display_type);
++		NativeDisplayType native_display_type = (NativeDisplayType)new_gldisplay.display;
++		new_gldisplay.egl_display = eglGetDisplay(native_display_type);
+ 	}
+ 
+ 	ERR_FAIL_COND_V(eglGetError() != EGL_SUCCESS, -1);
+@@ -287,8 +287,8 @@ Error EGLManager::window_create(DisplayServer::WindowID p_window_id, void *p_dis
+ 	if (GLAD_EGL_VERSION_1_5) {
+ 		glwindow.egl_surface = eglCreatePlatformWindowSurface(gldisplay.egl_display, gldisplay.egl_config, p_native_window, egl_attribs.ptr());
+ 	} else {
+-		EGLNativeWindowType *native_window_type = (EGLNativeWindowType *)p_native_window;
+-		glwindow.egl_surface = eglCreateWindowSurface(gldisplay.egl_display, gldisplay.egl_config, *native_window_type, nullptr);
++		EGLNativeWindowType native_window_type = (EGLNativeWindowType)p_native_window;
++		glwindow.egl_surface = eglCreateWindowSurface(gldisplay.egl_display, gldisplay.egl_config, native_window_type, nullptr);
+ 	}
+ 
+ 	if (glwindow.egl_surface == EGL_NO_SURFACE) {
+@@ -459,19 +459,38 @@ Error EGLManager::initialize(void *p_native_display) {
+ 			attribs.push_back((EGLint)attrib);
+ 		}
+ 		tmp_display = eglGetPlatformDisplayEXT(_get_platform_extension_enum(), p_native_display, attribs.ptr());
++		if (tmp_display == EGL_NO_DISPLAY)
++		{
++			EGLint err = eglGetError();
++			ERR_PRINT(vformat("eglGetPlatformDisplayExt error: %s", err));
++		}
+ #endif // EGL_EXT_platform_base
+ 	} else {
++		// Added some lines of code from example. AURORA_PORTING
++		int egl_version = gladLoaderLoadEGL(NULL);
++		if (!egl_version) {
++			printf("Unable to load EGL.\n");
++		}
++		printf("Loaded EGL %d.%d on first load.\n",
++			GLAD_VERSION_MAJOR(egl_version), GLAD_VERSION_MINOR(egl_version));
+ 		WARN_PRINT("EGL: EGL_EXT_platform_base not found during init, using default platform.");
+-		EGLNativeDisplayType *native_display_type = (EGLNativeDisplayType *)p_native_display;
++		EGLNativeDisplayType* native_display_type = (EGLNativeDisplayType*)p_native_display;
+ 		tmp_display = eglGetDisplay(*native_display_type);
+ 	}
+ 
+ 	if (tmp_display == EGL_NO_DISPLAY) {
+-		eglTerminate(tmp_display);
++		if (tmp_display != EGL_NO_DISPLAY)
++		{
++			eglTerminate(tmp_display);
++		}
+ 		ERR_FAIL_V_MSG(ERR_UNAVAILABLE, "Can't get a valid initial EGL display.");
+ 	}
+ 
++	// Added printing of Display extensions. AURORA_PORTING
+ 	eglInitialize(tmp_display, nullptr, nullptr);
++	const char *display_exts = eglQueryString(tmp_display, EGL_EXTENSIONS);
++	print_line("Display extensions: " + String(display_exts));
++
+ 
+ 	int version = gladLoaderLoadEGL(tmp_display);
+ 	if (!version) {
+@@ -513,15 +532,28 @@ Error EGLManager::initialize(void *p_native_display) {
+ 	}
+ #endif
+ 
+-	String client_extensions_string = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
++// Added logging and macros and additional condition - GLAD_EGL_EXT_platform_base. AURORA_PORTING 
++#ifdef EGL_EXT_platform_base
++	printf("GLAD_EGL_EXT_platform_base is defined.");
++
++	if (GLAD_EGL_EXT_platform_base)
++	{
++		String client_extensions_string = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
+ 
+-	// If the above method fails, we don't support client extensions, so there's nothing to check.
+-	if (eglGetError() == EGL_SUCCESS) {
+-		const char *platform = _get_platform_extension_name();
+-		if (!client_extensions_string.split(" ").has(platform)) {
+-			ERR_FAIL_V_MSG(ERR_UNAVAILABLE, vformat("EGL platform extension \"%s\" not found.", platform));
++		String client_exts = eglQueryString(NULL, EGL_EXTENSIONS);
++		printf("Full client extensions");
++		print_line(client_exts);
++
++
++		// If the above method fails, we don't support client extensions, so there's nothing to check.
++		if (eglGetError() == EGL_SUCCESS) {
++			const char *platform = _get_platform_extension_name();
++			if (!client_exts.split(" ").has(platform)) {
++				ERR_FAIL_V_MSG(ERR_UNAVAILABLE, vformat("EGL platform extension \"%s\" not found.", platform));
++			}
+ 		}
+ 	}
++#endif
+ 
+ 	return OK;
+ }
+diff --git a/platform/linuxbsd/wayland/display_server_wayland.cpp b/platform/linuxbsd/wayland/display_server_wayland.cpp
+index 5334446b22..d2f24d6b34 100644
+--- a/platform/linuxbsd/wayland/display_server_wayland.cpp
++++ b/platform/linuxbsd/wayland/display_server_wayland.cpp
+@@ -1558,9 +1558,34 @@ DisplayServerWayland::DisplayServerWayland(const String &p_rendering_driver, Win
+ 		}
+ 
+ 		if (rendering_driver == "opengl3_es") {
++
++			print_line(vformat("Current rendering driver: %s", rendering_driver));
++			print_line(vformat("EGL manager status: %s", egl_manager ? "Initialized" : "NULL"));
++
+ 			egl_manager = memnew(EGLManagerWaylandGLES);
+ 
++			if (egl_manager)
++			{
++
++				print_verbose("EGLManager details:");
++				print_verbose(vformat("context: %s", egl_manager));
++			}
++			else
++			{
++				print_error("EGLManager is not initialized!");
++			}
++
++			Error init_result = egl_manager->initialize(wayland_thread.get_wl_display());
++			if (init_result != OK)
++			{
++				ERR_PRINT(vformat("EGLManager::initialize failed with error: %s", init_result));
++			}
++
+ 			if (egl_manager->initialize(wayland_thread.get_wl_display()) != OK || egl_manager->open_display(wayland_thread.get_wl_display()) != OK) {
++
++				print_line("WaylandThread status:");
++				print_line(vformat("Display: %s", wayland_thread.get_wl_display()));
++
+ 				memdelete(egl_manager);
+ 				egl_manager = nullptr;
+ 				r_error = ERR_CANT_CREATE;
+diff --git a/platform/linuxbsd/wayland/wayland_thread.cpp b/platform/linuxbsd/wayland/wayland_thread.cpp
+index e34807763b..03dd92443b 100644
+--- a/platform/linuxbsd/wayland/wayland_thread.cpp
++++ b/platform/linuxbsd/wayland/wayland_thread.cpp
+@@ -33,10 +33,10 @@
+ #ifdef WAYLAND_ENABLED
+ 
+ #ifdef __FreeBSD__
+-#include <dev/evdev/input-event-codes.h>
++#include <dev/evdev/input.h>
+ #else
+ // Assume Linux.
+-#include <linux/input-event-codes.h>
++#include <linux/input.h>
+ #endif
+ 
+ // For the actual polling thread.
+@@ -428,6 +428,13 @@ void WaylandThread::_wl_registry_on_global(void *data, struct wl_registry *wl_re
+ 		return;
+ 	}
+ 
++    // wl-shell
++    if (strcmp(interface, wl_shell_interface.name) == 0) {
++        registry->wl_shell = (struct wl_shell *)wl_registry_bind(wl_registry, name, &wl_shell_interface, 1);
++        registry->wl_shell_name = name;
++    	return;
++    }
++
+ 	// NOTE: Deprecated.
+ 	if (strcmp(interface, zxdg_exporter_v1_interface.name) == 0) {
+ 		registry->xdg_exporter_v1 = (struct zxdg_exporter_v1 *)wl_registry_bind(wl_registry, name, &zxdg_exporter_v1_interface, 1);
+@@ -1073,6 +1080,12 @@ void WaylandThread::_frame_wl_callback_on_done(void *data, struct wl_callback *w
+ 		// rendering if needed.
+ 		wl_surface_set_buffer_scale(ws->wl_surface, window_state_get_preferred_buffer_scale(ws));
+ 	}
++
++	// AURORA_PORTING: коммитим, чтобы compositor знал, что приложение отвечает
++	wl_surface_commit(ws->wl_surface);
++	wl_display_flush(ws->wayland_thread->wl_display);
++	print_verbose("Frame callback done: committed surface and scheduled next frame.");
++
+ }
+ 
+ void WaylandThread::_wl_surface_on_leave(void *data, struct wl_surface *wl_surface, struct wl_output *wl_output) {
+@@ -3243,7 +3256,7 @@ void WaylandThread::seat_state_update_cursor(SeatState *p_ss) {
+ 		}
+ 	}
+ 
+-	wl_pointer_set_cursor(p_ss->wl_pointer, p_ss->pointer_enter_serial, p_ss->cursor_surface, hotspot_x, hotspot_y);
++	//wl_pointer_set_cursor(p_ss->wl_pointer, p_ss->pointer_enter_serial, p_ss->cursor_surface, hotspot_x, hotspot_y);
+ 	wl_surface_set_buffer_scale(p_ss->cursor_surface, scale);
+ 	wl_surface_attach(p_ss->cursor_surface, cursor_buffer, 0, 0);
+ 	wl_surface_damage_buffer(p_ss->cursor_surface, 0, 0, INT_MAX, INT_MAX);
+@@ -3350,39 +3363,49 @@ void WaylandThread::window_create(DisplayServer::WindowID p_window_id, int p_wid
+ 	}
+ #endif
+ 
+-	if (!decorated) {
+-		// libdecor has failed loading or is disabled, we shall handle xdg_toplevel
+-		// creation and decoration ourselves (and by decorating for now I just mean
+-		// asking for SSDs and hoping for the best).
+-		ws.xdg_surface = xdg_wm_base_get_xdg_surface(registry.xdg_wm_base, ws.wl_surface);
+-		xdg_surface_add_listener(ws.xdg_surface, &xdg_surface_listener, &ws);
+-
+-		ws.xdg_toplevel = xdg_surface_get_toplevel(ws.xdg_surface);
+-		xdg_toplevel_add_listener(ws.xdg_toplevel, &xdg_toplevel_listener, &ws);
+-
+-		if (registry.xdg_decoration_manager) {
+-			ws.xdg_toplevel_decoration = zxdg_decoration_manager_v1_get_toplevel_decoration(registry.xdg_decoration_manager, ws.xdg_toplevel);
+-			zxdg_toplevel_decoration_v1_add_listener(ws.xdg_toplevel_decoration, &xdg_toplevel_decoration_listener, &ws);
+-
+-			decorated = true;
+-		}
+-	}
+-
+-	ws.frame_callback = wl_surface_frame(ws.wl_surface);
+-	wl_callback_add_listener(ws.frame_callback, &frame_wl_callback_listener, &ws);
+-
+-	if (registry.xdg_exporter_v2) {
+-		ws.xdg_exported_v2 = zxdg_exporter_v2_export_toplevel(registry.xdg_exporter_v2, ws.wl_surface);
+-		zxdg_exported_v2_add_listener(ws.xdg_exported_v2, &xdg_exported_v2_listener, &ws);
+-	} else if (registry.xdg_exporter_v1) {
+-		ws.xdg_exported_v1 = zxdg_exporter_v1_export(registry.xdg_exporter_v1, ws.wl_surface);
+-		zxdg_exported_v1_add_listener(ws.xdg_exported_v1, &xdg_exported_v1_listener, &ws);
+-	}
+-
+-	wl_surface_commit(ws.wl_surface);
+-
+-	// Wait for the surface to be configured before continuing.
+-	wl_display_roundtrip(wl_display);
++    if (!decorated && registry.xdg_wm_base) {
++        ws.xdg_surface = xdg_wm_base_get_xdg_surface(registry.xdg_wm_base, ws.wl_surface);
++        xdg_surface_add_listener(ws.xdg_surface, &xdg_surface_listener, &ws);
++
++        ws.xdg_toplevel = xdg_surface_get_toplevel(ws.xdg_surface);
++        xdg_toplevel_add_listener(ws.xdg_toplevel, &xdg_toplevel_listener, &ws);
++
++        if (registry.xdg_decoration_manager) {
++            ws.xdg_toplevel_decoration = zxdg_decoration_manager_v1_get_toplevel_decoration(
++                registry.xdg_decoration_manager, ws.xdg_toplevel);
++            zxdg_toplevel_decoration_v1_add_listener(ws.xdg_toplevel_decoration, 
++                &xdg_toplevel_decoration_listener, &ws);
++            decorated = true;
++        }
++    }
++    // Попытка 3: Fallback на wl_shell (если xdg_shell недоступен)
++	// AURORA_PORTING
++    else if (!decorated && registry.wl_shell) {
++        ws.wl_shell_surface = wl_shell_get_shell_surface(registry.wl_shell, ws.wl_surface);
++        wl_shell_surface_set_toplevel(ws.wl_shell_surface);
++		wl_shell_surface_set_title(ws.wl_shell_surface, "Godot App");
++        print_verbose("Wayland: Using wl_shell fallback (xdg_wm_base not available).");
++    }
++    // Если ничего не доступно — ошибка
++    else {
++        ERR_FAIL_MSG("No supported shell protocol found (neither xdg_wm_base nor wl_shell).");
++    }
++
++    // Настройка frame callback (общее для всех)
++    ws.frame_callback = wl_surface_frame(ws.wl_surface);
++    wl_callback_add_listener(ws.frame_callback, &frame_wl_callback_listener, &ws);
++
++    // Экспорт поверхности (если поддерживается)
++    if (registry.xdg_exporter_v2) {
++        ws.xdg_exported_v2 = zxdg_exporter_v2_export_toplevel(registry.xdg_exporter_v2, ws.wl_surface);
++        zxdg_exported_v2_add_listener(ws.xdg_exported_v2, &xdg_exported_v2_listener, &ws);
++    } else if (registry.xdg_exporter_v1) {
++        ws.xdg_exported_v1 = zxdg_exporter_v1_export(registry.xdg_exporter_v1, ws.wl_surface);
++        zxdg_exported_v1_add_listener(ws.xdg_exported_v1, &xdg_exported_v1_listener, &ws);
++    }
++
++    wl_surface_commit(ws.wl_surface);
++    wl_display_roundtrip(wl_display);
+ }
+ 
+ struct wl_surface *WaylandThread::window_get_wl_surface(DisplayServer::WindowID p_window_id) const {
+@@ -3488,16 +3511,35 @@ void WaylandThread::window_start_resize(DisplayServer::WindowResizeEdge p_edge,
+ #endif
+ }
+ 
+-void WaylandThread::window_set_max_size(DisplayServer::WindowID p_window_id, const Size2i &p_size) {
+-	// TODO: Use window IDs for multiwindow support.
+-	WindowState &ws = main_window;
++//AURORA_PORTING
++void WaylandThread::_keep_alive_tick() {
++	while (true) {
++		std::this_thread::sleep_for(std::chrono::seconds(1));
+ 
+-	Vector2i logical_max_size = p_size / window_state_get_scale_factor(&ws);
++		//std::lock_guard<std::mutex> lock(mutex);
++		WindowState &ws = main_window;
+ 
+-	if (ws.wl_surface && ws.xdg_toplevel) {
+-		xdg_toplevel_set_max_size(ws.xdg_toplevel, logical_max_size.width, logical_max_size.height);
++		if (ws.wl_surface) {
++			wl_surface_commit(ws.wl_surface);
++			wl_display_flush(wl_display);
++		}
+ 	}
++}
++
+ 
++
++void WaylandThread::window_set_max_size(DisplayServer::WindowID p_window_id, const Size2i &p_size) {
++	// TODO: Use window IDs for multiwindow support.
++	// AURORA_PORTING. Added check for wl_shell
++	WindowState &ws = main_window;
++	if (ws.xdg_toplevel)
++	{
++		Vector2i logical_max_size = p_size / window_state_get_scale_factor(&ws);
++	
++		if (ws.wl_surface) {
++			xdg_toplevel_set_max_size(ws.xdg_toplevel, logical_max_size.width, logical_max_size.height);
++		}
++	}
+ #ifdef LIBDECOR_ENABLED
+ 	if (ws.libdecor_frame) {
+ 		libdecor_frame_set_max_content_size(ws.libdecor_frame, logical_max_size.width, logical_max_size.height);
+@@ -3509,14 +3551,17 @@ void WaylandThread::window_set_max_size(DisplayServer::WindowID p_window_id, con
+ 
+ void WaylandThread::window_set_min_size(DisplayServer::WindowID p_window_id, const Size2i &p_size) {
+ 	// TODO: Use window IDs for multiwindow support.
++	// AURORA_PORTING. Переделал этот момент, чтобы не выполнять ничего, если не инициализирован xdg_toplevel
+ 	WindowState &ws = main_window;
++	if (ws.xdg_toplevel)
++	{
+ 
+-	Size2i logical_min_size = p_size / window_state_get_scale_factor(&ws);
+-
+-	if (ws.wl_surface && ws.xdg_toplevel) {
+-		xdg_toplevel_set_min_size(ws.xdg_toplevel, logical_min_size.width, logical_min_size.height);
++		Size2i logical_min_size = p_size / window_state_get_scale_factor(&ws);
++	
++		if (ws.wl_surface) {
++			xdg_toplevel_set_min_size(ws.xdg_toplevel, logical_min_size.width, logical_min_size.height);
++		}
+ 	}
+-
+ #ifdef LIBDECOR_ENABLED
+ 	if (ws.libdecor_frame) {
+ 		libdecor_frame_set_min_content_size(ws.libdecor_frame, logical_min_size.width, logical_min_size.height);
+@@ -3925,7 +3970,30 @@ Error WaylandThread::init() {
+ 
+ 	ERR_FAIL_NULL_V_MSG(registry.wl_shm, ERR_UNAVAILABLE, "Can't obtain the Wayland shared memory global.");
+ 	ERR_FAIL_NULL_V_MSG(registry.wl_compositor, ERR_UNAVAILABLE, "Can't obtain the Wayland compositor global.");
+-	ERR_FAIL_NULL_V_MSG(registry.xdg_wm_base, ERR_UNAVAILABLE, "Can't obtain the Wayland XDG shell global.");
++	
++    // Пытаемся получить xdg_wm_base
++    if (registry.xdg_wm_base_name != 0)
++    {
++    registry.xdg_wm_base = static_cast<xdg_wm_base*>(
++        wl_registry_bind(wl_registry, registry.xdg_wm_base_name, &xdg_wm_base_interface, 1));
++    }
++
++    // Если xdg_wm_base недоступен, пробуем wl_shell
++    if (registry.xdg_wm_base == nullptr && registry.wl_shell_name != 0)
++    {
++        registry.wl_shell = static_cast<wl_shell*>(
++        wl_registry_bind(wl_registry, registry.wl_shell_name, &wl_shell_interface, 1));  
++
++
++        if (registry.wl_shell != nullptr)
++        {
++            print_verbose("Wayland: Falling back to wl_shell (xdg_shell not available)")
++        }
++    }
++	std::thread(&WaylandThread::_keep_alive_tick, this).detach();
++
++    ERR_FAIL_NULL_V_MSG(registry.xdg_wm_base || registry.wl_shell, ERR_UNAVAILABLE, "Can't obtain the Wayland XDG or WL shell global.");
++
+ 
+ 	if (!registry.xdg_decoration_manager) {
+ #ifdef LIBDECOR_ENABLED
+diff --git a/platform/linuxbsd/wayland/wayland_thread.h b/platform/linuxbsd/wayland/wayland_thread.h
+index 053dac35e6..f344fbe9e7 100644
+--- a/platform/linuxbsd/wayland/wayland_thread.h
++++ b/platform/linuxbsd/wayland/wayland_thread.h
+@@ -147,11 +147,17 @@ public:
+ 		List<struct wl_output *> wl_outputs;
+ 		List<struct wl_seat *> wl_seats;
+ 
++		struct wl_registry* registry = nullptr;
++
+ 		// xdg-shell globals.
+ 
+ 		struct xdg_wm_base *xdg_wm_base = nullptr;
+ 		uint32_t xdg_wm_base_name = 0;
+ 
++        //wl-shell globals.        
++        struct wl_shell* wl_shell = nullptr;
++        uint32_t wl_shell_name = 0;
++
+ 		// NOTE: Deprecated.
+ 		struct zxdg_exporter_v1 *xdg_exporter_v1 = nullptr;
+ 		uint32_t xdg_exporter_v1_name = 0;
+@@ -232,6 +238,9 @@ public:
+ 		struct wp_viewport *wp_viewport = nullptr;
+ 		struct wp_fractional_scale_v1 *wp_fractional_scale = nullptr;
+ 
++        // wl-shell 
++        struct wl_shell_surface* wl_shell_surface = nullptr; 
++
+ 		// NOTE: Deprecated.
+ 		struct zxdg_exported_v1 *xdg_exported_v1 = nullptr;
+ 
+@@ -672,6 +681,9 @@ private:
+ 
+ 	static void _xdg_activation_token_on_done(void *data, struct xdg_activation_token_v1 *xdg_activation_token, const char *token);
+ 
++	// AURORA_PORTING
++	void _keep_alive_tick();
++
+ 	// Core Wayland event listeners.
+ 	static constexpr struct wl_registry_listener wl_registry_listener = {
+ 		.global = _wl_registry_on_global,
+-- 
+2.51.0
+
