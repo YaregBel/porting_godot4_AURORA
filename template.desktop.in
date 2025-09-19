@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+X-Nemo-Application-Type=no-invoker
+Icon=__package_name__
+Exec=/usr/bin/__package_name__ --main-pack /usr/share/__package_name__/test.pck
+Name=__application_read_name__
+Comment=__package_summary__
+Categories=Game
+
+[X-Application]
+Permissions=Audio__package_premissions__
+OrganizationName=__application_org__
+ApplicationName=__application_name__

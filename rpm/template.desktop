@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+X-Nemo-Application-Type=no-invoker
+Icon=ru.yareg.game
+Exec=/usr/bin/ru.yareg.game --main-pack /usr/share/ru.yareg.game/test.pck
+Name=Godot 4 Materials
+Comment=Godot 4 game example
+Categories=Game
+
+[X-Application]
+Permissions=Audio
+OrganizationName=ru.yareg
+ApplicationName=game
